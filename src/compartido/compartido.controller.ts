@@ -1,8 +1,12 @@
 // src/compartido/compartido.controller.ts
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Req, UseGuards, Get, Param, Patch } from '@nestjs/common';
 import { CompartidoService } from './compartido.service';
-import { ModuloTipo, VisibilidadNivel } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CreateInvitacionDto } from './dto/create-invitacion.dto';
+import { AceptarInvitacionDto } from './dto/aceptar-invitacion.dto';
+import { UpdatePermisosDto } from './dto/update-permisos.dto';
+import { CreateMovimientoDto } from './dto/create-movcomp.dto';
+import { SyncOcultosDto } from './dto/sync-ocultos.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('compartido')
@@ -10,65 +14,37 @@ export class CompartidoController {
   constructor(private readonly service: CompartidoService) {}
 
   @Post('invitar')
-  invitar(@Req() req, @Body() body: {
-    partnerEmail: string;
-    partnerDisplayName: string;
-    relacion: any;
-    aliasParaOwner?: string;
-    permisos: { modulo: ModuloTipo; visibilidad: VisibilidadNivel }[];
-  }) {
-    return this.service.invitar(req.user.id, body);
+  createInvitacion(@Req() req, @Body() body: CreateInvitacionDto) {
+    return this.service.createInvitacion(req.user.id, body);
   }
 
-  @Post(':id/aceptar')
-  aceptar(@Req() req, @Param('id') id: string, @Body() body: { aliasParaPartner?: string }) {
-    return this.service.aceptarInvitacion(req.user.id, id, body.aliasParaPartner);
+  @Post('invitacion/aceptar')
+  aceptarInvitacion(@Req() req, @Body() body: AceptarInvitacionDto) {
+    return this.service.aceptarInvitacion(req.user.id, body);
   }
 
-  @Get(':id/permisos')
-  obtenerPermisos(@Req() req, @Param('id') id: string) {
-    return this.service.obtenerPermisos(id, req.user.id);
+  @Get('asociaciones')
+  getMisAsociaciones(@Req() req) {
+    return this.service.getMisAsociaciones(req.user.id);
   }
 
-  @Patch(':id/permisos')
-  actualizarPermisos(
-    @Req() req,
-    @Param('id') id: string,
-    @Body() body: { permisos: { modulo: ModuloTipo; visibilidad: VisibilidadNivel }[] }
-  ) {
-    return this.service.actualizarPermisos(id, req.user.id, body.permisos);
+  @Get('invitaciones')
+  getInvitacionesPendientes(@Req() req) {
+    return this.service.getInvitacionesPendientes(req.user.email);
+  }
+  
+  @Patch('permisos/:asociacionId')
+  updatePermisos(@Req() req, @Param('asociacionId') asociacionId: string, @Body() body: UpdatePermisosDto) {
+    return this.service.updatePermisos(req.user.id, asociacionId, body);
   }
 
-  @Get(':id/ocultos')
-  listarOcultos(@Req() req, @Param('id') id: string) {
-    return this.service.listarOcultos(id, req.user.id);
+  @Post('ocultos/:asociacionId')
+  syncOcultos(@Req() req, @Param('asociacionId') asociacionId: string, @Body() body: SyncOcultosDto) {
+    return this.service.syncOcultos(req.user.id, asociacionId, body);
   }
 
-  @Patch(':id/ocultos')
-  syncOcultos(
-    @Req() req,
-    @Param('id') id: string,
-    @Body() body: {
-      add?: { modulo: ModuloTipo; recordId: string }[];
-      remove?: { modulo: ModuloTipo; recordId: string }[];
-    }
-  ) {
-    return this.service.syncOcultos(id, req.user.id, body.add, body.remove);
-  }
-
-  @Get(':id/dashboard')
-  dashboard(@Req() req, @Param('id') id: string, @Query('from') from?: string, @Query('to') to?: string) {
-    return this.service.dashboard(id, req.user.id, {
-      from: from ? new Date(from) : undefined,
-      to: to ? new Date(to) : undefined,
-    });
-  }
-
-  @Post(':id/movimientos')
-  crearMovimiento(@Req() req, @Param('id') id: string, @Body() body: {
-    modulo: ModuloTipo; concepto: string; montoTotal: number; aporteOwner?: number; aportePartner?: number; fecha: string;
-    categoriaIdGasto?: string; categoriaAhorro?: string; categoriaInversion?: string;
-  }) {
-    return this.service.crearMovimientoCompartido(id, req.user.id, body);
+  @Post('movimiento')
+  createMovimiento(@Req() req, @Body() body: CreateMovimientoDto) {
+    return this.service.createMovimiento(req.user.id, body);
   }
 }

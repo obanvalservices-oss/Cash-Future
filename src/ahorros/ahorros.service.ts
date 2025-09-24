@@ -1,55 +1,56 @@
+// src/ahorros/ahorros.service.ts
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+
+interface CreateAhorroDto {
+  objetivo: string;
+  meta: number;
+  aporte?: number; // Aporte inicial
+  fijo: boolean;
+  fechaInicio?: string;
+  frecuencia?: 'semanal' | 'bisemanal' | 'mensual';
+  aporteFijo?: number;
+}
+
+interface UpdateAhorroDto extends Partial<CreateAhorroDto> {}
 
 @Injectable()
 export class AhorrosService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(userId: number, dto: any) {
+  async create(userId: number, dto: CreateAhorroDto) {
     try {
-      const created = await this.prisma.ahorro.create({
+      const createdFondo = await this.prisma.ahorro.create({
         data: {
-          objetivo: dto.nombre ?? dto.objetivo ?? '',
-          monto: dto.meta ?? dto.monto ?? 0,                 // meta
-          categoria: 'FONDO',
-          fecha: new Date(dto.fechaInicio ?? dto.fecha),     // fechaInicio real
-          recurrente: !!(dto.fijo ?? dto.recurrente),        // fijo
-          colorTag: dto.frecuencia ?? null,                  // usamos colorTag para guardar frecuencia
-          // guardamos aporte fijo en un campo libre (sharedId) si no tienes columna dedicada
-          sharedId: dto.aporteFijo != null ? String(dto.aporteFijo) : null,
-          // descripción opcional
-          descripcion: dto.descripcion ?? dto.nombre ?? null,
-          user: { connect: { id: userId } },
-          isShared: false,
-        } as any,
+          userId,
+          objetivo: dto.objetivo,
+          meta: dto.meta,
+          fijo: dto.fijo,
+          fechaInicio: dto.fijo ? new Date(dto.fechaInicio) : new Date(),
+          frecuencia: dto.fijo ? dto.frecuencia : null,
+          aporteFijo: dto.fijo ? dto.aporteFijo : 0,
+        },
       });
 
-      // primer movimiento (si llega "aporte")
-      if (typeof dto.aporte === 'number' && dto.aporte > 0) {
+      // Si hay un aporte inicial, se registra como el primer movimiento
+      if (dto.aporte && dto.aporte > 0) {
         await this.prisma.movimientoAhorro.create({
           data: {
-            ahorro: { connect: { id: created.id } },
-            fecha: new Date(dto.fechaInicio ?? dto.fecha),
-            motivo: 'APORTE',
+            ahorroId: createdFondo.id,
             monto: dto.aporte,
+            motivo: 'Aporte inicial',
+            fecha: createdFondo.fechaInicio,
           },
         });
       }
 
-      return created;
+      return createdFondo;
     } catch (e) {
-      throw new InternalServerErrorException('Error al crear ahorro.');
+      console.error(e);
+      throw new InternalServerErrorException('Error al crear el fondo de ahorro.');
     }
   }
 
-  async findAllByUser(userId: number) {
-    return this.prisma.ahorro.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-    });
-  }
-
-  // Devuelve fondos con saldo + datos necesarios para proyección
   async findAllByUserWithSaldo(userId: number) {
     const fondos = await this.prisma.ahorro.findMany({
       where: { userId },
@@ -57,92 +58,39 @@ export class AhorrosService {
       include: { movimientos: true },
     });
 
-    return fondos.map((f: any) => {
-      const saldo = (f.movimientos || []).reduce((acc: number, m: any) => acc + (Number(m.monto) || 0), 0);
-      const aporteFijo = f.sharedId != null && !isNaN(Number(f.sharedId)) ? Number(f.sharedId) : 0;
-
-      return {
-        id: f.id,
-        nombre: f.objetivo,
-        descripcion: f.descripcion ?? null,
-        meta: Number(f.monto) || 0,
-        fechaInicio: f.fecha,            // clave para proyección
-        fechaCreacion: f.createdAt,
-        fijo: !!f.recurrente,
-        frecuencia: f.colorTag ?? '',    // semanal | bisemanal | mensual
-        aporteFijo,                      // monto a proyectar
-        saldo,
-        movimientos: (f.movimientos || []).map((m: any) => ({
-          id: m.id,
-          fecha: m.fecha,
-          motivo: m.motivo,
-          monto: Number(m.monto) || 0,
-        })),
-      };
+    return fondos.map(f => {
+      const saldo = f.movimientos.reduce((acc, m) => acc + m.monto, 0);
+      return { ...f, saldo };
     });
   }
 
-  async update(id: string, dto: any) {
+  async update(userId: number, id: number, dto: UpdateAhorroDto) {
+    await this.findAndEnsureOwner(userId, id); // Verifica propiedad
     return this.prisma.ahorro.update({
-      where: { id: Number(id) },
+      where: { id },
       data: {
-        objetivo: dto.nombre ?? dto.objetivo,
-        descripcion: dto.descripcion,
-        monto: dto.meta ?? dto.monto,
-        fecha: dto.fechaInicio ? new Date(dto.fechaInicio) : dto.fecha ? new Date(dto.fecha) : undefined,
-        recurrente: dto.fijo ?? dto.recurrente,
-        colorTag: (dto.frecuencia === undefined ? undefined : dto.frecuencia),
-        sharedId: (dto.aporteFijo === undefined ? undefined : String(dto.aporteFijo)),
-      } as any,
+        objetivo: dto.objetivo,
+        meta: dto.meta,
+        fijo: dto.fijo,
+        fechaInicio: dto.fechaInicio ? new Date(dto.fechaInicio) : undefined,
+        frecuencia: dto.frecuencia,
+        aporteFijo: dto.aporteFijo,
+      },
     });
   }
 
-  async remove(userId: number, id: string) {
-    const fondo = await this.prisma.ahorro.findFirst({ where: { id: Number(id), userId } });
-    if (!fondo) throw new NotFoundException('Fondo no encontrado');
-
-    await this.prisma.$transaction([
-      this.prisma.movimientoAhorro.deleteMany({ where: { ahorroId: fondo.id } }),
-      this.prisma.ahorro.delete({ where: { id: fondo.id } }),
+  async remove(userId: number, id: number) {
+    await this.findAndEnsureOwner(userId, id);
+    // Usamos una transacción para borrar los movimientos y luego el fondo
+    return this.prisma.$transaction([
+      this.prisma.movimientoAhorro.deleteMany({ where: { ahorroId: id } }),
+      this.prisma.ahorro.delete({ where: { id } }),
     ]);
-
-    return { ok: true };
   }
-
-  // Movimientos
-  async addMovimiento(ahorroId: number, data: { fecha: Date; monto: number; motivo: string }) {
-    const f = await this.prisma.ahorro.findUnique({ where: { id: ahorroId } });
-    if (!f) throw new NotFoundException('Fondo no encontrado');
-
-    return this.prisma.movimientoAhorro.create({
-      data: {
-        ahorro: { connect: { id: ahorroId } },
-        fecha: data.fecha,
-        motivo: data.motivo,
-        monto: data.monto,
-      },
-    });
-  }
-
-  async updateMovimiento(ahorroId: number, movId: number, patch: { fecha?: Date; monto?: number; motivo?: string }) {
-    const mov = await this.prisma.movimientoAhorro.findUnique({ where: { id: movId } });
-    if (!mov || mov.ahorroId !== ahorroId) throw new NotFoundException('Movimiento no encontrado');
-
-    return this.prisma.movimientoAhorro.update({
-      where: { id: movId },
-      data: {
-        fecha: patch.fecha,
-        monto: patch.monto as any,
-        motivo: patch.motivo,
-      },
-    });
-  }
-
-  async deleteMovimiento(ahorroId: number, movId: number) {
-    const mov = await this.prisma.movimientoAhorro.findUnique({ where: { id: movId } });
-    if (!mov || mov.ahorroId !== ahorroId) throw new NotFoundException('Movimiento no encontrado');
-
-    await this.prisma.movimientoAhorro.delete({ where: { id: movId } });
-    return { ok: true };
+  
+  private async findAndEnsureOwner(userId: number, ahorroId: number) {
+    const fondo = await this.prisma.ahorro.findFirst({ where: { id: ahorroId, userId } });
+    if (!fondo) throw new NotFoundException('Fondo de ahorro no encontrado o no pertenece al usuario.');
+    return fondo;
   }
 }

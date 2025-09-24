@@ -1,6 +1,4 @@
-// ==========================
 // prisma/schema.prisma
-// ==========================
 
 generator client {
   provider = "prisma-client-js"
@@ -10,8 +8,6 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
-
-//// ===== ENUMS =====
 
 enum RelacionTipo {
   PAREJA
@@ -42,42 +38,35 @@ enum AsociacionEstado {
   BLOQUEADA
 }
 
-// Fuente del pago de una deuda
 enum PaySource {
-  INCOME // desde un ingreso (flujo normal de caja)
-  SAVINGS // desde un fondo de ahorro (ahorros)
+  INCOME
+  SAVINGS
 }
 
-//// ===== MODELOS PRINCIPALES =====
-
 model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  password  String
-  nombre    String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  asociacionesCreadas  Asociacion[]           @relation("AsociacionesCreadas")
-  asociacionesInvitado Asociacion[]           @relation("AsociacionesInvitado")
-  movimientosCreados   MovimientoCompartido[] @relation("SharedCreatedBy")
-  Ingreso              Ingreso[]
-  Gasto                Gasto[]
-  Ahorro               Ahorro[]
-  FondoInversion       FondoInversion[]
-  Inversion            Inversion[]
-
-  // ⬇️ Relación necesaria para el módulo de deudas
-  debts Debt[]
-
-  UserSettings UserSettings?
+  id                    Int                    @id @default(autoincrement())
+  email                 String                 @unique
+  password              String
+  nombre                String
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  asociacionesCreadas   Asociacion[]           @relation("AsociacionesCreadas")
+  asociacionesInvitado  Asociacion[]           @relation("AsociacionesInvitado")
+  movimientosCreados    MovimientoCompartido[] @relation("SharedCreatedBy")
+  Ingreso               Ingreso[]
+  Gasto                 Gasto[]
+  Ahorro                Ahorro[]
+  FondoInversion        FondoInversion[]
+  Inversion             Inversion[]
+  debts                 Debt[]
+  UserSettings          UserSettings?
 }
 
 model UserSettings {
   id            Int     @id @default(autoincrement())
   userId        Int     @unique
   weekStartDay  Int     @default(1)
-  weekEndDay    Int     @default(7)
+  weekEndDay    Int     @default(0)
   currency      String? @default("USD")
   timezone      String? @default("UTC")
   notifications Boolean @default(true)
@@ -87,13 +76,15 @@ model UserSettings {
 model Categoria {
   id        String   @id @default(uuid())
   nombre    String
-  modulo    String // "INGRESOS" | "GASTOS" | "AHORROS" | "INVERSIONES"
+  modulo    String
   gastos    Gasto[]  @relation("CategoriaGastos")
   createdAt DateTime @default(now())
 }
 
 model Ingreso {
   id         Int      @id @default(autoincrement())
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id])
   fuente     String
   monto      Float
   frecuencia String?
@@ -102,29 +93,24 @@ model Ingreso {
   categoria  String
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
-
-  userId Int
-  user   User @relation(fields: [userId], references: [id])
-
-  isShared Boolean @default(false)
-  sharedId String?
-  colorTag String?
-
+  isShared   Boolean  @default(false)
+  sharedId   String?
+  colorTag   String?
   @@index([sharedId])
 }
 
 model Gasto {
   id          String    @id @default(uuid())
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id])
   descripcion String
   monto       Float
   origen      String
   fecha       DateTime
   fijo        Boolean
   frecuencia  String?
-  categoria   Categoria @relation("CategoriaGastos", fields: [categoriaId], references: [id])
   categoriaId String
-  user        User      @relation(fields: [userId], references: [id])
-  userId      Int
+  categoria   Categoria @relation("CategoriaGastos", fields: [categoriaId], references: [id])
   createdAt   DateTime  @default(now())
   isShared    Boolean   @default(false)
   sharedId    String?
@@ -132,106 +118,74 @@ model Gasto {
 }
 
 model Ahorro {
-  id          Int                @id @default(autoincrement())
-  objetivo    String             @default("")
-  monto       Float              @default(0)
-  categoria   String             @default("")
-  fecha       DateTime
-  recurrente  Boolean            @default(false)
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  movimientos MovimientoAhorro[]
-
-  userId Int
-  user   User @relation(fields: [userId], references: [id])
-
-  isShared   Boolean @default(false)
-  sharedId   String?
-  colorTag   String?
-
-  // 👇 NUEVO
-  descripcion String?
-
-  // back-relation
+  id           Int                @id @default(autoincrement())
+  userId       Int
+  user         User               @relation(fields: [userId], references: [id])
+  objetivo     String
+  meta         Float              @default(0)
+  fechaInicio  DateTime           @default(now())
+  fijo         Boolean            @default(false)
+  frecuencia   String?
+  aporteFijo   Float?             @default(0)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  movimientos  MovimientoAhorro[]
   debtPayments DebtPayment[]
-
-  @@index([sharedId])
 }
 
 model FondoInversion {
   id          Int         @id @default(autoincrement())
+  userId      Int
+  user        User        @relation(fields: [userId], references: [id])
   nombre      String
-  monto       Float
-  fecha       DateTime    @default(now())
-  descripcion String?
   inversiones Inversion[]
-
-  userId Int
-  user   User @relation(fields: [userId], references: [id])
+  @@unique([userId, nombre])
 }
 
 model Inversion {
   id           Int            @id @default(autoincrement())
+  userId       Int
+  user         User           @relation(fields: [userId], references: [id])
+  fondoId      Int
+  fondo        FondoInversion @relation(fields: [fondoId], references: [id], onDelete: Cascade)
   tipo         String
   activo       String
-  categoria    String
-  cantidad     Float?
-  precioCompra Float?
-  precioActual Float?
+  ticker       String
+  cantidad     Float
+  precioCompra Float
   descripcion  String?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
-  fondo        FondoInversion @relation(fields: [fondoId], references: [id])
-  fondoId      Int
-
-  userId Int
-  user   User @relation(fields: [userId], references: [id])
-
-  isShared Boolean @default(false)
-  sharedId String?
-  colorTag String?
-
-  @@index([sharedId])
 }
 
 model MovimientoAhorro {
-  id     Int      @id @default(autoincrement())
-  fecha  DateTime @default(now())
-  motivo String   @default("")
-  monto  Float    @default(0)
-
-  ahorro   Ahorro @relation(fields: [ahorroId], references: [id])
-  ahorroId Int
-
+  id        Int      @id @default(autoincrement())
+  ahorroId  Int
+  ahorro    Ahorro   @relation(fields: [ahorroId], references: [id], onDelete: Cascade)
+  fecha     DateTime @default(now())
+  motivo    String   @default("")
+  monto     Float    @default(0)
   createdAt DateTime @default(now())
 }
 
-//// ===== COMPARTIDO / ASOCIACIONES =====
-
 model Asociacion {
-  id                 String           @id @default(cuid())
-  ownerId            Int
-  partnerUserId      Int?
-  partnerEmail       String
-  partnerDisplayName String
-  relacion           RelacionTipo
-  estado             AsociacionEstado @default(PENDIENTE)
-  aliasParaOwner     String?
-  aliasParaPartner   String?
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-
-  owner       User  @relation("AsociacionesCreadas", fields: [ownerId], references: [id], onDelete: Cascade)
-  partnerUser User? @relation("AsociacionesInvitado", fields: [partnerUserId], references: [id], onDelete: SetNull)
-
-  permisos               AsociacionPermiso[]
-  ocultos                AsociacionOculto[]
+  id                   String                 @id @default(cuid())
+  ownerId              Int
+  partnerUserId        Int?
+  partnerEmail         String
+  partnerDisplayName   String
+  relacion             RelacionTipo
+  estado               AsociacionEstado       @default(PENDIENTE)
+  aliasParaOwner       String?
+  aliasParaPartner     String?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  owner                User                   @relation("AsociacionesCreadas", fields: [ownerId], references: [id], onDelete: Cascade)
+  partnerUser          User?                  @relation("AsociacionesInvitado", fields: [partnerUserId], references: [id], onDelete: SetNull)
+  permisos             AsociacionPermiso[]
+  ocultos              AsociacionOculto[]
   movimientosCompartidos MovimientoCompartido[]
-
   @@unique([ownerId, partnerEmail])
-  @@index([ownerId, partnerUserId])
-  @@index([ownerId])
-  @@index([partnerUserId])
 }
 
 model AsociacionPermiso {
@@ -239,9 +193,7 @@ model AsociacionPermiso {
   asociacionId String
   modulo       ModuloTipo
   visibilidad  VisibilidadNivel
-
-  asociacion Asociacion @relation(fields: [asociacionId], references: [id])
-
+  asociacion   Asociacion       @relation(fields: [asociacionId], references: [id], onDelete: Cascade)
   @@unique([asociacionId, modulo])
 }
 
@@ -250,14 +202,12 @@ model AsociacionOculto {
   asociacionId String
   modulo       ModuloTipo
   recordId     String
-
-  asociacion Asociacion @relation(fields: [asociacionId], references: [id])
-
+  asociacion   Asociacion @relation(fields: [asociacionId], references: [id], onDelete: Cascade)
   @@index([asociacionId, modulo])
 }
 
 model MovimientoCompartido {
-  id              String     @id @default(cuid())
+  id              String      @id @default(cuid())
   asociacionId    String
   modulo          ModuloTipo
   concepto        String
@@ -265,54 +215,41 @@ model MovimientoCompartido {
   aporteOwner     Float
   aportePartner   Float
   fecha           DateTime
-  createdByUserId Int? // opcional para onDelete: SetNull
-
-  asociacion Asociacion @relation(fields: [asociacionId], references: [id], onDelete: Cascade)
-  createdBy  User?      @relation("SharedCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-
+  createdByUserId Int?
+  asociacion      Asociacion  @relation(fields: [asociacionId], references: [id], onDelete: Cascade)
+  createdBy       User?       @relation("SharedCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   @@index([asociacionId])
-  @@index([createdByUserId])
 }
 
-//// ===== MÓDULO DE DEUDAS =====
-
 model Debt {
-  id     Int  @id @default(autoincrement())
-  userId Int
-  user   User @relation(fields: [userId], references: [id])
-
+  id                 Int      @id @default(autoincrement())
+  userId             Int
+  user               User     @relation(fields: [userId], references: [id])
   title              String
   description        String?
   principal          Float
   interestRate       Float?   @default(0)
   startDate          DateTime
   dueDay             Int?
-  frequency          String?   // 'mensual' | 'semanal' | 'bisemanal'
+  frequency          String?
   installmentAmount  Float?
-  initialDownPayment Float?    @default(0)
-  status             String    @default("ACTIVA")
-
-  // 👇 NUEVO
+  initialDownPayment Float?   @default(0)
+  status             String   @default("ACTIVA")
   firstDueDate       DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  payments DebtPayment[]
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  payments           DebtPayment[]
 }
 
 model DebtPayment {
-  id     Int  @id @default(autoincrement())
-  debtId Int
-  debt   Debt @relation(fields: [debtId], references: [id], onDelete: Cascade)
-
+  id        Int      @id @default(autoincrement())
+  debtId    Int
+  debt      Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
   fecha     DateTime
   monto     Float
-  paySource PaySource @default(INCOME) // INCOME o SAVINGS
-
-  ahorroId Int?
-  ahorro   Ahorro? @relation(fields: [ahorroId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-
+  paySource PaySource @default(INCOME)
+  ahorroId  Int?
+  ahorro    Ahorro?  @relation(fields: [ahorroId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   note      String?
   createdAt DateTime @default(now())
 }

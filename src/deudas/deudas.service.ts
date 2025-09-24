@@ -11,19 +11,21 @@ export interface CreateDebtDto {
   title: string;
   description?: string | null;
   principal: number;
-  startDate: string;           // ISO date
-  hasInstallments?: boolean;   // UI only (no se guarda)
-  installmentsCount?: number;  // UI only — se usa solo para calcular installmentAmount
+  startDate: string; // ISO date
+  interestRate?: number | null; // <--- AÑADIDO
+  hasInstallments?: boolean; // UI only (no se guarda)
+  installmentsCount?: number; // UI only — se usa solo para calcular installmentAmount
+  installmentAmount?: number | null; // <--- AÑADIDO
   frequency?: Frequency;
   firstDueDate?: string | null;
 
   // fuentes de pago
-  downPayment?: number;        // pago inicial
+  downPayment?: number; // pago inicial
   downSource?: 'NONE' | 'INGRESO' | 'SAVINGS';
-  downSavings?: number;        // ahorroId si downSource === 'SAVINGS'
+  downSavings?: number; // ahorroId si downSource === 'SAVINGS'
 
   installmentsSource?: 'INGRESO' | 'SAVINGS'; // (hoy: informativo; no se guarda)
-  instSavings?: number;        // ahorroId para cuotas (hoy: informativo; no se guarda)
+  instSavings?: number; // ahorroId para cuotas (hoy: informativo; no se guarda)
 }
 
 export interface UpdateDebtDto {
@@ -34,15 +36,15 @@ export interface UpdateDebtDto {
   startDate?: string;
   dueDay?: number | null;
   frequency?: Frequency;
-  installmentAmount?: number | null; // puedes setear manualmente
+  installmentAmount?: number | null; // puedes setear manually
   status?: 'ACTIVA' | 'INACTIVA';
 }
 
 export interface AddPaymentDto {
-  amount: number;                     // monto del pago
-  fecha?: string;                     // ISO date (default: today)
+  amount: number; // monto del pago
+  fecha?: string; // ISO date (default: today)
   source?: 'MANUAL' | 'INGRESO' | 'SAVINGS';
-  ahorroId?: number;                  // si source === 'SAVINGS'
+  ahorroId?: number; // si source === 'SAVINGS'
 }
 
 @Injectable()
@@ -123,7 +125,7 @@ export class DeudasService {
         principal: dto.principal,
         interestRate: dto.interestRate ?? null,
         startDate: new Date(dto.startDate),
-        frequency: dto.frequency ?? null,        // 'semanal' | 'bisemanal' | 'mensual'
+        frequency: dto.frequency ?? null, // 'semanal' | 'bisemanal' | 'mensual'
         installmentAmount: dto.installmentAmount ?? null,
         initialDownPayment: dto.downPayment ?? 0,
         firstDueDate: dto.firstDueDate ? new Date(dto.firstDueDate) : null, // 👈

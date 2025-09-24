@@ -1,6 +1,18 @@
-import { Controller, Get, Post, Body, Param, Delete, Req, UseGuards, Patch, Query } from '@nestjs/common';
+// src/inversiones/inversiones.controller.ts
+import { Controller, Get, Post, Body, Patch, Param, Delete, Req, UseGuards, ParseIntPipe } from '@nestjs/common';
 import { InversionesService } from './inversiones.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+
+class CreateInversionDto {
+  tipo: string;
+  activo: string;
+  ticker: string; // <-- AÑADIDO
+  cantidad: number;
+  precioCompra: number;
+  descripcion?: string;
+}
+
+class UpdateInversionDto extends CreateInversionDto {}
 
 @UseGuards(JwtAuthGuard)
 @Controller('inversiones')
@@ -8,8 +20,8 @@ export class InversionesController {
   constructor(private readonly inversionesService: InversionesService) {}
 
   @Post()
-  create(@Req() req, @Body() dto: any) {
-    return this.inversionesService.create(req.user.id, dto);
+  create(@Req() req, @Body() createInversionDto: CreateInversionDto) {
+    return this.inversionesService.create(req.user.id, createInversionDto);
   }
 
   @Get()
@@ -17,24 +29,18 @@ export class InversionesController {
     return this.inversionesService.findAllByUser(req.user.id);
   }
 
-  @Get('proyectados')
-  findAllWithProjection(@Req() req, @Query('meses') meses?: string) {
-    // Por ahora no proyectamos inversiones; devolvemos las reales
-    return this.inversionesService.findAllByUser(req.user.id);
-  }
-
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.inversionesService.findOne(id);
+  findOne(@Req() req, @Param('id', ParseIntPipe) id: number) {
+    return this.inversionesService.findOne(req.user.id, id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: any) {
-    return this.inversionesService.update(id, dto);
+  update(@Req() req, @Param('id', ParseIntPipe) id: number, @Body() updateInversionDto: Partial<UpdateInversionDto>) {
+    return this.inversionesService.update(req.user.id, id, updateInversionDto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.inversionesService.remove(id);
+  remove(@Req() req, @Param('id', ParseIntPipe) id: number) {
+    return this.inversionesService.remove(req.user.id, id);
   }
 }

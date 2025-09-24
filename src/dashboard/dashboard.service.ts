@@ -1,23 +1,27 @@
 // src/dashboard/dashboard.service.ts
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MarketDataService } from '../market-data/market-data.service';
+import { Inversion, Ahorro, Debt } from '@prisma/client';
 
-type WeeklyParams = {
-  period?: 'SEMANA' | 'COMPARAR' | '1M' | '3M' | '6M' | string | undefined;
-  from?: string;
-  to?: string;
-};
-
+type WeeklyParams = { period?: 'SEMANA' | 'COMPARAR' | '1M' | '3M' | '6M' | string | undefined; from?: string; to?: string; };
 type WeekSpan = { start: Date; end: Date; label: string };
+
+export type FondoWidgetDto = { id: number; nombre: string; saldo: number; meta: number; };
+export type DeudasWidgetDto = { id: number; nombre: string; saldoPendiente: number; montoTotal: number; };
+export type ActivoAgrupadoDto = { activo: string; ticker: string; totalCantidad: number; totalInvertido: number; valorActual: number; pnl: number; pnlPorcentaje: number; };
+export type InversionesWidgetDto = { activos: ActivoAgrupadoDto[]; pnlTotal: number; inversionTotal: number; valorTotal: number; };
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly marketDataService: MarketDataService,
+  ) {}
 
-  // ========= Fechas (respetando settings del usuario) =========
   private startOfWeek(d: Date, weekStartDay: number): Date {
     const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    const dow = x.getDay(); // 0..6 (0=Dom)
+    const dow = x.getDay();
     const offset = (7 + dow - weekStartDay) % 7;
     x.setDate(x.getDate() - offset);
     x.setHours(0, 0, 0, 0);
@@ -26,61 +30,35 @@ export class DashboardService {
 
   private endOfWeek(d: Date, weekEndDay: number, weekStartDay: number): Date {
     const s = this.startOfWeek(d, weekStartDay);
-    // Diferencia entre start y end considerando día de fin custom
-    const span = (7 + weekEndDay - weekStartDay) % 7; // 0..6
+    const span = (7 + weekEndDay - weekStartDay) % 7;
     const e = new Date(s);
     e.setDate(s.getDate() + span);
     e.setHours(23, 59, 59, 999);
     return e;
   }
 
-  private addWeeks(d: Date, n: number) {
-    const r = new Date(d);
-    r.setDate(r.getDate() + n * 7);
-    return r;
-    }
-
-  private addMonths(d: Date, n: number) {
-    const r = new Date(d);
-    r.setMonth(r.getMonth() + n);
-    return r;
-  }
+  private addWeeks(d: Date, n: number) { const r = new Date(d); r.setDate(r.getDate() + n * 7); return r; }
+  private addMonths(d: Date, n: number) { const r = new Date(d); r.setMonth(r.getMonth() + n); return r; }
 
   private fmtLabel(start: Date, end: Date, idx: number, period: string) {
     const s = start.toLocaleDateString();
     const e = end.toLocaleDateString();
-    if (period === 'COMPARAR') {
-      return idx === 0 ? `Semana (actual) ${s} - ${e}` : `Semana (anterior) ${s} - ${e}`;
-    }
+    if (period === 'COMPARAR') { return idx === 0 ? `Semana (actual) ${s} - ${e}` : `Semana (anterior) ${s} - ${e}`; }
     return `Semana ${s} - ${e}`;
   }
 
-  private buildWeeksByPeriod(
-    now: Date,
-    period: string,
-    weekStartDay: number,
-    weekEndDay: number,
-  ): WeekSpan[] {
+  private buildWeeksByPeriod(now: Date, period: string, weekStartDay: number, weekEndDay: number): WeekSpan[] {
     const curS = this.startOfWeek(now, weekStartDay);
     const curE = this.endOfWeek(now, weekEndDay, weekStartDay);
-
-    if (period === 'SEMANA' || !period) {
-      return [{ start: curS, end: curE, label: this.fmtLabel(curS, curE, 0, 'SEMANA') }];
-    }
-
+    if (period === 'SEMANA' || !period) { return [{ start: curS, end: curE, label: this.fmtLabel(curS, curE, 0, 'SEMANA') }]; }
     if (period === 'COMPARAR') {
       const prevS = this.addWeeks(curS, -1);
       const prevE = this.endOfWeek(prevS, weekEndDay, weekStartDay);
-      return [
-        { start: curS, end: curE, label: this.fmtLabel(curS, curE, 0, 'COMPARAR') },
-        { start: prevS, end: prevE, label: this.fmtLabel(prevS, prevE, 1, 'COMPARAR') },
-      ];
+      return [ { start: curS, end: curE, label: this.fmtLabel(curS, curE, 0, 'COMPARAR') }, { start: prevS, end: prevE, label: this.fmtLabel(prevS, prevE, 1, 'COMPARAR') }];
     }
-
     const monthsMap: Record<string, number> = { '1M': 1, '3M': 3, '6M': 6 };
     const m = monthsMap[period] ?? 1;
     const endTarget = this.endOfWeek(this.addMonths(now, m), weekEndDay, weekStartDay);
-
     const arr: WeekSpan[] = [];
     let cursor = new Date(curS);
     let idx = 0;
@@ -93,15 +71,9 @@ export class DashboardService {
     return arr;
   }
 
-  private buildWeeksByRange(
-    from: Date,
-    to: Date,
-    weekStartDay: number,
-    weekEndDay: number,
-  ): WeekSpan[] {
+  private buildWeeksByRange(from: Date, to: Date, weekStartDay: number, weekEndDay: number): WeekSpan[] {
     const first = this.startOfWeek(from, weekStartDay);
     const last = this.endOfWeek(to, weekEndDay, weekStartDay);
-
     const out: WeekSpan[] = [];
     let cursor = new Date(first);
     let idx = 0;
@@ -114,271 +86,168 @@ export class DashboardService {
     return out;
   }
 
-  // ========= Proyección de fijos (semanal/mensual) =========
   private placeInWeek(date: Date, weeks: WeekSpan[]): number {
     const t = +date;
-    for (let i = 0; i < weeks.length; i++) {
-      if (t >= +weeks[i].start && t <= +weeks[i].end) return i;
-    }
+    for (let i = 0; i < weeks.length; i++) { if (t >= +weeks[i].start && t <= +weeks[i].end) return i; }
     return -1;
   }
 
-  private projectWeeklyDates(
-    baseDate: Date,
-    weeks: WeekSpan[],
-    weekStartDay: number,
-  ): Date[] {
-    // Repite mismo día de la semana (dow) del baseDate en cada semana
-    const targetDow = baseDate.getDay();
+  private projectRecurringDates(baseDate: Date, weeks: WeekSpan[], frequency: 'semanal' | 'bisemanal' | 'quincenal' | 'mensual') {
     const out: Date[] = [];
-    for (const w of weeks) {
-      // día dentro de la semana = (targetDow - weekStartDay + 7) % 7
-      const delta = (7 + targetDow - weekStartDay) % 7;
-      const d = new Date(w.start);
-      d.setDate(d.getDate() + delta);
-      out.push(d);
-    }
-    return out;
-  }
-
-  private daysInMonth(y: number, mZeroBased: number) {
-    return new Date(y, mZeroBased + 1, 0).getDate();
-  }
-
-  private projectMonthlyDates(baseDate: Date, weeks: WeekSpan[]): Date[] {
-    const day = baseDate.getDate(); // 1..31
-    const out: Date[] = [];
-    // Recorremos meses cubiertos por el rango de weeks
+    if (!frequency) return out;
+    
     const first = weeks[0].start;
-    const last = weeks[weeks.length - 1].end;
+    const last = weeks[weeks.length-1].end;
+    let cursor = new Date(baseDate);
 
-    let y = first.getFullYear();
-    let m = first.getMonth();
+    // Avanzar cursor hasta el inicio del rango si es necesario
+    while (cursor < first) {
+      if (frequency === 'semanal') cursor = this.addWeeks(cursor, 1);
+      else if (frequency === 'bisemanal') cursor = this.addWeeks(cursor, 2);
+      else if (frequency === 'mensual') cursor = this.addMonths(cursor, 1);
+      else break; 
+    }
 
-    while (new Date(y, m, 1) <= last) {
-      const dim = this.daysInMonth(y, m);
-      const d = new Date(y, m, Math.min(day, dim), 12, 0, 0, 0); // 12:00 para evitar TZ edge
-      if (d >= first && d <= last) out.push(d);
-      m += 1;
-      if (m > 11) {
-        m = 0;
-        y += 1;
-      }
+    // Generar fechas dentro del rango
+    while(cursor <= last) {
+      out.push(new Date(cursor));
+      if (frequency === 'semanal') cursor = this.addWeeks(cursor, 1);
+      else if (frequency === 'bisemanal') cursor = this.addWeeks(cursor, 2);
+      else if (frequency === 'mensual') cursor = this.addMonths(cursor, 1);
+      else break;
     }
     return out;
   }
 
-  // ========= Carga y armado =========
   async getWeekly(userId: number, params: WeeklyParams) {
-    // 1) Settings del usuario
-    const settings =
-      (await this.prisma.userSettings.findUnique({ where: { userId } })) ??
-      ({
-        userId,
-        weekStartDay: 1, // Lunes
-        weekEndDay: 0, // Domingo
-        currency: 'USD',
-        timezone: 'UTC',
-        notifications: true,
-      } as any);
-
+    const settings = (await this.prisma.userSettings.findUnique({ where: { userId } })) ?? ({} as any);
     const weekStartDay = Number(settings.weekStartDay ?? 1);
     const weekEndDay = Number(settings.weekEndDay ?? 0);
-
-    // 2) Definir weeks
     let weeks: WeekSpan[];
-    if (params.from && params.to) {
-      const fromD = new Date(params.from);
-      const toD = new Date(params.to);
-      weeks = this.buildWeeksByRange(fromD, toD, weekStartDay, weekEndDay);
-    } else {
-      const now = new Date();
-      const p = (params.period || 'SEMANA').toUpperCase();
-      weeks = this.buildWeeksByPeriod(now, p, weekStartDay, weekEndDay);
-    }
-
-    if (!weeks.length) return { weeks: [], totals: { ingresos: 0, gastos: 0, ahorros: 0, inversiones: 0 } };
-
+    if (params.from && params.to) { weeks = this.buildWeeksByRange(new Date(params.from), new Date(params.to), weekStartDay, weekEndDay); } else { const p = (params.period || '6M').toUpperCase(); weeks = this.buildWeeksByPeriod(new Date(), p, weekStartDay, weekEndDay); }
+    if (!weeks.length) return { widgets: {}, weeklyProjection: { weeks: [], totals: {} } };
     const rangeStart = weeks[0].start;
     const rangeEnd = weeks[weeks.length - 1].end;
 
-    // 3) Traer datos reales en el rango (para no fijos y para referencia de fijos)
-    const [ingresos, gastos, inversiones, fondos] = await Promise.all([
-      this.prisma.ingreso.findMany({
-        where: { userId, OR: [{ fecha: { gte: rangeStart, lte: rangeEnd } }, { fijo: true }] },
-        orderBy: { fecha: 'asc' },
-      }),
-      this.prisma.gasto.findMany({
-        where: { userId, OR: [{ fecha: { gte: rangeStart, lte: rangeEnd } }, { fijo: true }] },
-        orderBy: { fecha: 'asc' },
-        include: { categoria: true },
-      }),
-      this.prisma.inversion.findMany({
-        where: { userId, createdAt: { gte: rangeStart, lte: rangeEnd } },
-        orderBy: { createdAt: 'asc' },
-      }),
-      this.prisma.ahorro.findMany({
-        where: { userId },
-        include: { movimientos: true },
-        orderBy: { createdAt: 'desc' },
-      }),
+    const [ingresos, gastos, inversiones, fondos, deudas] = await Promise.all([
+      this.prisma.ingreso.findMany({ where: { userId, OR: [{ fecha: { gte: rangeStart, lte: rangeEnd } }, { fijo: true }] }}),
+      this.prisma.gasto.findMany({ where: { userId, OR: [{ fecha: { gte: rangeStart, lte: rangeEnd } }, { fijo: true }] }, include: { categoria: true } }),
+      this.prisma.inversion.findMany({ where: { userId } }),
+      this.prisma.ahorro.findMany({ where: { userId }, include: { movimientos: true } }),
+      this.prisma.debt.findMany({ where: { userId, status: 'ACTIVA' }, include: { payments: true } }),
     ]);
 
-    // 4) Inicializar buckets
-    const buckets = weeks.map((w) => ({
-      title: w.label,
-      start: w.start,
-      end: w.end,
-      ingresos: [] as any[],
-      gastos: [] as any[],
-      inversiones: [] as any[],
-      aportes: [] as any[],
-    }));
+    const weeklyProjectionResult = this.calculateWeeklyProjection(weeks, ingresos, gastos, inversiones, fondos, deudas, weekStartDay);
+    const totalsAll = weeklyProjectionResult.totals;
+    const saldoProyectado = totalsAll.ingresos - totalsAll.gastos - totalsAll.ahorros - totalsAll.inversiones - totalsAll.pagosDeuda;
 
-    // 5) Inversiones (solo reales por createdAt)
+    const fondosWidget = fondos.map(f => ({ id: f.id, nombre: f.objetivo, saldo: f.movimientos.reduce((acc, mov) => acc + mov.monto, 0), meta: f.meta }));
+    const deudasWidget = deudas.map(d => ({ id: d.id, nombre: d.title, montoTotal: d.principal, saldoPendiente: d.principal - d.payments.reduce((acc, p) => acc + p.monto, 0) }));
+    const inversionesWidget = await this.buildInversionesWidget(inversiones);
+
+    return {
+      widgets: { saldoProyectado: { monto: saldoProyectado, fechaFinal: rangeEnd }, fondos: fondosWidget, inversiones: inversionesWidget, deudas: deudasWidget },
+      weeklyProjection: { weeks: weeklyProjectionResult.weeks, totals: weeklyProjectionResult.totals },
+      settings: { weekStartDay, weekEndDay },
+    };
+  }
+
+  private async buildInversionesWidget(inversiones: Inversion[]): Promise<InversionesWidgetDto> {
+    if (inversiones.length === 0) { return { activos: [], pnlTotal: 0, inversionTotal: 0, valorTotal: 0 }; }
+    const tickers = [...new Set(inversiones.map(inv => inv.ticker.toUpperCase()))];
+    const preciosActuales = await this.marketDataService.getPrices(tickers);
+    const agrupado: Record<string, ActivoAgrupadoDto> = {};
     for (const inv of inversiones) {
-      const idx = this.placeInWeek(inv.createdAt, weeks);
-      if (idx >= 0) buckets[idx].inversiones.push(inv);
+      const ticker = inv.ticker.toUpperCase();
+      if (!agrupado[ticker]) { agrupado[ticker] = { activo: inv.activo, ticker, totalCantidad: 0, totalInvertido: 0, valorActual: 0, pnl: 0, pnlPorcentaje: 0 }; }
+      const precioActual = preciosActuales[ticker] ?? inv.precioCompra;
+      agrupado[ticker].totalCantidad += inv.cantidad;
+      agrupado[ticker].totalInvertido += inv.cantidad * inv.precioCompra;
+      agrupado[ticker].valorActual += inv.cantidad * precioActual;
     }
+    let pnlTotalGeneral = 0, inversionTotalGeneral = 0, valorTotalGeneral = 0;
+    const activosResultantes = Object.values(agrupado).map(activo => {
+      activo.pnl = activo.valorActual - activo.totalInvertido;
+      activo.pnlPorcentaje = activo.totalInvertido > 0 ? (activo.pnl / activo.totalInvertido) * 100 : 0;
+      pnlTotalGeneral += activo.pnl;
+      inversionTotalGeneral += activo.totalInvertido;
+      valorTotalGeneral += activo.valorActual;
+      return activo;
+    });
+    return { activos: activosResultantes, pnlTotal: pnlTotalGeneral, inversionTotal: inversionTotalGeneral, valorTotal: valorTotalGeneral };
+  }
+  
+  private calculateWeeklyProjection(weeks: WeekSpan[], ingresos: any[], gastos: any[], inversiones: Inversion[], fondos: (Ahorro & {movimientos: any[]})[], deudas: (Debt & {payments: any[]})[], weekStartDay: number) {
+    const buckets = weeks.map(w => ({ title: w.label, start: w.start, end: w.end, ingresos: [], gastos: [], inversiones: [], aportes: [], pagosDeuda: [] }));
 
-    // 6) Aportes reales (movimientos de ahorro)
-    for (const f of fondos) {
-      for (const m of f.movimientos) {
-        const idx = this.placeInWeek(new Date(m.fecha), weeks);
+    const placeItem = (item: any, collection: any[][]) => {
+        const idx = this.placeInWeek(new Date(item.fecha || item.createdAt), weeks);
         if (idx >= 0) {
-          buckets[idx].aportes.push({
-            id: `mov_${f.id}_${m.id}`,
-            fondoId: f.id,
-            monto: Number(m.monto) || 0,
-            motivo: m.motivo || 'APORTE',
-            fecha: m.fecha,
-            fondoNombre: f.objetivo,
-          });
+            collection[idx].push(item);
         }
-      }
-    }
+    };
+    
+    ingresos.forEach(i => {
+        if (!i.fijo || !i.frecuencia) { placeItem(i, buckets.map(b => b.ingresos)); }
+        else {
+            const dates = this.projectRecurringDates(i.fecha, weeks, i.frecuencia);
+            dates.forEach(d => placeItem({ ...i, fecha: d, __projection: true, id: `proj_ing_${i.id}_${d.toISOString().slice(0, 10)}` }, buckets.map(b => b.ingresos)));
+        }
+    });
 
-    // 7) Ingresos — reales + proyección de fijos
-    for (const inc of ingresos) {
-      const fecha = new Date(inc.fecha);
-      if (!inc.fijo) {
-        const idx = this.placeInWeek(fecha, weeks);
-        if (idx >= 0) buckets[idx].ingresos.push(inc);
-        continue;
-      }
-
-      const freq = (inc.frecuencia || '').toLowerCase();
-      if (freq === 'semanal') {
-        const dates = this.projectWeeklyDates(fecha, weeks, weekStartDay);
-        for (const d of dates) {
-          const idx = this.placeInWeek(d, weeks);
-          if (idx >= 0) {
-            buckets[idx].ingresos.push({
-              ...inc,
-              id: `proj_ing_${inc.id}_${d.toISOString().slice(0, 10)}`,
-              fecha: d,
-              __projection: true,
+    gastos.forEach(g => {
+        if (!g.fijo || !g.frecuencia) { placeItem(g, buckets.map(b => b.gastos)); }
+        else {
+            const dates = this.projectRecurringDates(g.fecha, weeks, g.frecuencia);
+            dates.forEach(d => placeItem({ ...g, fecha: d, __projection: true, id: `proj_gto_${g.id}_${d.toISOString().slice(0, 10)}` }, buckets.map(b => b.gastos)));
+        }
+    });
+    
+    fondos.forEach(f => {
+        f.movimientos.forEach(m => placeItem({...m, objetivo: f.objetivo, tipo: 'aporte'}, buckets.map(b => b.aportes)));
+        if (f.fijo && f.aporteFijo > 0 && f.frecuencia) {
+            const dates = this.projectRecurringDates(f.fechaInicio, weeks, f.frecuencia as any);
+            dates.forEach(d => {
+                const ymd = d.toISOString().slice(0,10);
+                if (!f.movimientos.some(m => new Date(m.fecha).toISOString().slice(0,10) === ymd)) {
+                    placeItem({ monto: f.aporteFijo, fecha: d, objetivo: f.objetivo, tipo: 'aporte', __projection: true, id: `proj_apo_${f.id}_${ymd}` }, buckets.map(b => b.aportes));
+                }
             });
-          }
         }
-      } else if (freq === 'mensual') {
-        const dates = this.projectMonthlyDates(fecha, weeks);
-        for (const d of dates) {
-          const idx = this.placeInWeek(d, weeks);
-          if (idx >= 0) {
-            buckets[idx].ingresos.push({
-              ...inc,
-              id: `proj_ing_${inc.id}_${d.toISOString().slice(0, 10)}`,
-              fecha: d,
-              __projection: true,
+    });
+    
+    deudas.forEach(d => {
+        d.payments.forEach(p => placeItem({ ...p, title: d.title, tipo: 'pagoDeuda' }, buckets.map(b => b.pagosDeuda)));
+        if (d.installmentAmount > 0 && d.firstDueDate && d.frequency) {
+            const dates = this.projectRecurringDates(d.firstDueDate, weeks, d.frequency as any);
+            dates.forEach(due => {
+                const ymd = due.toISOString().slice(0,10);
+                if (!d.payments.some(p => new Date(p.fecha).toISOString().slice(0,10) === ymd)) {
+                    placeItem({ monto: d.installmentAmount, fecha: due, title: d.title, tipo: 'pagoDeuda', __projection: true, id: `proj_deu_${d.id}_${ymd}` }, buckets.map(b => b.pagosDeuda));
+                }
             });
-          }
         }
-      } else {
-        // fijo sin frecuencia conocida: solo su fecha real si entra en rango
-        const idx = this.placeInWeek(fecha, weeks);
-        if (idx >= 0) buckets[idx].ingresos.push(inc);
-      }
-    }
+    });
 
-    // 8) Gastos — reales + proyección de fijos
-    for (const g of gastos) {
-      const fecha = new Date(g.fecha);
-      if (!g.fijo) {
-        const idx = this.placeInWeek(fecha, weeks);
-        if (idx >= 0) buckets[idx].gastos.push(g);
-        continue;
-      }
+    inversiones.forEach(inv => placeItem(inv, buckets.map(b => b.inversiones)));
+    
+    const sum = (arr: any[], field = 'monto') => arr.reduce((a, x) => a + (Number(x[field]) || 0), 0);
+    const sumInversiones = (arr: any[]) => arr.reduce((a, x) => a + (Number(x.precioCompra * x.cantidad) || 0), 0);
+    
+    const result = buckets.map((b) => {
+      const totals = {
+        ingresos: sum(b.ingresos), gastos: sum(b.gastos), ahorros: sum(b.aportes),
+        inversiones: sumInversiones(b.inversiones), pagosDeuda: sum(b.pagosDeuda), balance: 0,
+      };
+      totals.balance = totals.ingresos - totals.gastos - totals.ahorros - totals.inversiones - totals.pagosDeuda;
+      return { ...b, totals };
+    });
 
-      const freq = (g.frecuencia || '').toLowerCase();
-      if (freq === 'semanal') {
-        const dates = this.projectWeeklyDates(fecha, weeks, weekStartDay);
-        for (const d of dates) {
-          const idx = this.placeInWeek(d, weeks);
-          if (idx >= 0) {
-            buckets[idx].gastos.push({
-              ...g,
-              id: `proj_gto_${g.id}_${d.toISOString().slice(0, 10)}`,
-              fecha: d,
-              __projection: true,
-            });
-          }
-        }
-      } else if (freq === 'mensual') {
-        const dates = this.projectMonthlyDates(fecha, weeks);
-        for (const d of dates) {
-          const idx = this.placeInWeek(d, weeks);
-          if (idx >= 0) {
-            buckets[idx].gastos.push({
-              ...g,
-              id: `proj_gto_${g.id}_${d.toISOString().slice(0, 10)}`,
-              fecha: d,
-              __projection: true,
-            });
-          }
-        }
-      } else {
-        const idx = this.placeInWeek(fecha, weeks);
-        if (idx >= 0) buckets[idx].gastos.push(g);
-      }
-    }
-
-    // 9) Totales
-    const sum = (arr: any[], field = 'monto') =>
-      arr.reduce((a, x) => a + (Number((x as any)[field]) || 0), 0);
-
-    const result = buckets.map((b) => ({
-      title: b.title,
-      start: b.start,
-      end: b.end,
-      ingresos: b.ingresos,
-      gastos: b.gastos,
-      aportes: b.aportes,
-      inversiones: b.inversiones,
-      totals: {
-        ingresos: sum(b.ingresos, 'monto'),
-        gastos: sum(b.gastos, 'monto'),
-        ahorros: sum(b.aportes, 'monto'),
-        inversiones: sum(b.inversiones, 'monto') || 0,
-        balance:
-          sum(b.ingresos, 'monto') -
-          sum(b.gastos, 'monto') -
-          sum(b.aportes, 'monto') -
-          (sum(b.inversiones, 'monto') || 0),
-      },
-    }));
-
-    const totalsAll = result.reduce(
-      (acc, r) => {
-        acc.ingresos += r.totals.ingresos;
-        acc.gastos += r.totals.gastos;
-        acc.ahorros += r.totals.ahorros;
-        acc.inversiones += r.totals.inversiones;
+    const totalsAll = result.reduce((acc, r) => {
+        Object.keys(r.totals).forEach(key => { if(key !== 'balance') acc[key] = (acc[key] || 0) + r.totals[key]; });
         return acc;
-      },
-      { ingresos: 0, gastos: 0, ahorros: 0, inversiones: 0 },
-    );
+      }, { ingresos: 0, gastos: 0, ahorros: 0, inversiones: 0, pagosDeuda: 0 });
 
-    return { weeks: result, totals: totalsAll, settings: { weekStartDay, weekEndDay } };
+    return { weeks: result, totals: totalsAll };
   }
 }

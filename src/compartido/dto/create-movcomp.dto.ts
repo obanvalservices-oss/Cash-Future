@@ -1,10 +1,11 @@
 import { ModuloTipo } from '@prisma/client';
 
-export class CreateMovCompDto {
+export class CreateMovimientoDto {
+  asociacionId: string;
   modulo: ModuloTipo;
   concepto: string;
   montoTotal: number;
-  aporteOwner?: number;   // si no mandas, se calcula 50/50
-  aportePartner?: number; // opcional
-  fecha: string;          // ISO
+  tipoDivision: 'IGUAL' | 'EXACTO' | 'PROPORCIONAL';
+  aporteOwner?: number;
+  fecha: string;
 }

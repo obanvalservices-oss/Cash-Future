@@ -8,9 +8,10 @@ import { AhorrosModule } from './ahorros/ahorros.module';
 import { InversionesModule } from './inversiones/inversiones.module';
 import { CategoriasModule } from './categorias/categorias.module';
 import { CompartidoModule } from './compartido/compartido.module';
-import { SharedModule } from './shared/shared.module';
 import { SettingsModule } from './settings/settings.module';
-import { DeudasModule } from './deudas/deudas.module'; // ⬅️ NUEVO
+import { DeudasModule } from './deudas/deudas.module';
+import { DashboardModule } from './dashboard/dashboard.module';
+import { MarketDataModule } from './market-data/market-data.module'; // <-- AÑADIR
 
 @Module({
   imports: [
@@ -21,10 +22,11 @@ import { DeudasModule } from './deudas/deudas.module'; // ⬅️ NUEVO
     AhorrosModule,
     InversionesModule,
     CategoriasModule,
-    SharedModule,
     CompartidoModule,
     SettingsModule,
-    DeudasModule, // ⬅️ NUEVO
+    DeudasModule,
+    DashboardModule,
+    MarketDataModule, // <-- AÑADIR
   ],
 })
 export class AppModule {}
