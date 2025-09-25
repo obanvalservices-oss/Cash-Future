@@ -1,5 +1,9 @@
 // src/ahorros/ahorros.service.ts
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 interface CreateAhorroDto {
@@ -26,7 +30,8 @@ export class AhorrosService {
           objetivo: dto.objetivo,
           meta: dto.meta,
           fijo: dto.fijo,
-          fechaInicio: dto.fijo ? new Date(dto.fechaInicio) : new Date(),
+          // CORRECCIÓN: Usamos la fecha de inicio solo si viene, sino la fecha actual.
+          fechaInicio: dto.fijo && dto.fechaInicio ? new Date(dto.fechaInicio) : new Date(),
           frecuencia: dto.fijo ? dto.frecuencia : null,
           aporteFijo: dto.fijo ? dto.aporteFijo : 0,
         },
@@ -47,7 +52,9 @@ export class AhorrosService {
       return createdFondo;
     } catch (e) {
       console.error(e);
-      throw new InternalServerErrorException('Error al crear el fondo de ahorro.');
+      throw new InternalServerErrorException(
+        'Error al crear el fondo de ahorro.',
+      );
     }
   }
 
@@ -58,7 +65,7 @@ export class AhorrosService {
       include: { movimientos: true },
     });
 
-    return fondos.map(f => {
+    return fondos.map((f) => {
       const saldo = f.movimientos.reduce((acc, m) => acc + m.monto, 0);
       return { ...f, saldo };
     });
@@ -87,10 +94,37 @@ export class AhorrosService {
       this.prisma.ahorro.delete({ where: { id } }),
     ]);
   }
-  
+
   private async findAndEnsureOwner(userId: number, ahorroId: number) {
-    const fondo = await this.prisma.ahorro.findFirst({ where: { id: ahorroId, userId } });
-    if (!fondo) throw new NotFoundException('Fondo de ahorro no encontrado o no pertenece al usuario.');
+    const fondo = await this.prisma.ahorro.findFirst({
+      where: { id: ahorroId, userId },
+    });
+    if (!fondo)
+      throw new NotFoundException(
+        'Fondo de ahorro no encontrado o no pertenece al usuario.',
+      );
     return fondo;
+  }
+
+  // --- MOVIMIENTOS ---
+  async addMovimiento(
+    userId: number,
+    ahorroId: number,
+    dto: { monto: number; motivo?: string; fecha?: string },
+  ) {
+    await this.findAndEnsureOwner(userId, ahorroId);
+    return this.prisma.movimientoAhorro.create({
+      data: {
+        ahorroId,
+        monto: dto.monto,
+        motivo: dto.motivo ?? (dto.monto > 0 ? 'Aporte' : 'Retiro'),
+        fecha: dto.fecha ? new Date(dto.fecha) : new Date(),
+      },
+    });
+  }
+
+  async removeMovimiento(userId: number, ahorroId: number, movId: number) {
+    await this.findAndEnsureOwner(userId, ahorroId);
+    return this.prisma.movimientoAhorro.delete({ where: { id: movId } });
   }
 }

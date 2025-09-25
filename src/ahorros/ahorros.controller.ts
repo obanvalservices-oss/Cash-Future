@@ -29,6 +29,12 @@ class CreateAhorroDto {
 
 class UpdateAhorroDto extends CreateAhorroDto {}
 
+class AddMovimientoDto {
+  monto: number;
+  motivo?: string;
+  fecha?: string; // ISO Date
+}
+
 @UseGuards(JwtAuthGuard)
 @Controller('ahorros')
 export class AhorrosController {
@@ -57,5 +63,27 @@ export class AhorrosController {
   @Delete(':id')
   remove(@Req() req, @Param('id', ParseIntPipe) id: number) {
     return this.ahorrosService.remove(req.user.id, id);
+  }
+
+  // ---- Movimientos ----
+  @Post(':id/movimientos')
+  addMovimiento(
+    @Req() req,
+    @Param('id', ParseIntPipe) ahorroId: number,
+    @Body() dto: AddMovimientoDto,
+  ) {
+    if (typeof dto.monto !== 'number') {
+      throw new BadRequestException('El monto debe ser un número.');
+    }
+    return this.ahorrosService.addMovimiento(req.user.id, ahorroId, dto);
+  }
+
+  @Delete(':id/movimientos/:movId')
+  removeMovimiento(
+    @Req() req,
+    @Param('id', ParseIntPipe) ahorroId: number,
+    @Param('movId', ParseIntPipe) movId: number,
+  ) {
+    return this.ahorrosService.removeMovimiento(req.user.id, ahorroId, movId);
   }
 }

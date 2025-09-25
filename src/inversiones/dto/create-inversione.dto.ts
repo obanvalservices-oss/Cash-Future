@@ -1,19 +1,33 @@
-// src/inversiones/dto/create-inversion.dto.ts
-import { IsString, IsNumber, IsOptional, IsInt, IsDateString } from 'class-validator';
+// src/inversiones/dto/create-inversione.dto.ts
+import { IsString, IsNumber, IsOptional, IsInt, IsNotEmpty } from 'class-validator';
 
 export class CreateInversionDto {
-  @IsString() tipo: string;
-  @IsString() activo: string;
-  @IsString() categoria: string;
+  @IsString()
+  @IsNotEmpty()
+  tipo: string;
 
-  @IsNumber() cantidad: number;
-  @IsNumber() precioCompra: number;
-  @IsNumber() precioActual: number;
+  @IsString()
+  @IsNotEmpty()
+  activo: string;
+  
+  @IsString()
+  @IsNotEmpty()
+  ticker: string;
 
-  @IsString() @IsOptional() descripcion?: string;
+  @IsString()
+  @IsNotEmpty()
+  categoria: string;
 
-  @IsInt() fondoId: number;
-  @IsDateString() fecha: string;
+  @IsNumber()
+  cantidad: number;
 
-  @IsInt() userId: number;
+  @IsNumber()
+  precioCompra: number;
+
+  @IsString()
+  @IsOptional()
+  descripcion?: string;
+
+  @IsInt()
+  fondoId: number;
 }

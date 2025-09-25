@@ -2,7 +2,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MarketDataService } from '../market-data/market-data.service';
-import { Inversion, Ahorro, Debt } from '@prisma/client';
+import { Inversion, Ahorro, Debt, MovimientoAhorro } from '@prisma/client';
 
 type WeeklyParams = { period?: 'SEMANA' | 'COMPARAR' | '1M' | '3M' | '6M' | string | undefined; from?: string; to?: string; };
 type WeekSpan = { start: Date; end: Date; label: string };
@@ -19,6 +19,7 @@ export class DashboardService {
     private readonly marketDataService: MarketDataService,
   ) {}
 
+  // ... (todas las funciones de fecha como startOfWeek, endOfWeek, etc., se quedan igual)
   private startOfWeek(d: Date, weekStartDay: number): Date {
     const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
     const dow = x.getDay();
@@ -100,7 +101,6 @@ export class DashboardService {
     const last = weeks[weeks.length-1].end;
     let cursor = new Date(baseDate);
 
-    // Avanzar cursor hasta el inicio del rango si es necesario
     while (cursor < first) {
       if (frequency === 'semanal') cursor = this.addWeeks(cursor, 1);
       else if (frequency === 'bisemanal') cursor = this.addWeeks(cursor, 2);
@@ -108,7 +108,6 @@ export class DashboardService {
       else break; 
     }
 
-    // Generar fechas dentro del rango
     while(cursor <= last) {
       out.push(new Date(cursor));
       if (frequency === 'semanal') cursor = this.addWeeks(cursor, 1);
@@ -137,7 +136,7 @@ export class DashboardService {
       this.prisma.debt.findMany({ where: { userId, status: 'ACTIVA' }, include: { payments: true } }),
     ]);
 
-    const weeklyProjectionResult = this.calculateWeeklyProjection(weeks, ingresos, gastos, inversiones, fondos, deudas, weekStartDay);
+    const weeklyProjectionResult = this.calculateWeeklyProjection(weeks, ingresos, gastos, inversiones, fondos, deudas);
     const totalsAll = weeklyProjectionResult.totals;
     const saldoProyectado = totalsAll.ingresos - totalsAll.gastos - totalsAll.ahorros - totalsAll.inversiones - totalsAll.pagosDeuda;
 
@@ -177,56 +176,75 @@ export class DashboardService {
     return { activos: activosResultantes, pnlTotal: pnlTotalGeneral, inversionTotal: inversionTotalGeneral, valorTotal: valorTotalGeneral };
   }
   
-  private calculateWeeklyProjection(weeks: WeekSpan[], ingresos: any[], gastos: any[], inversiones: Inversion[], fondos: (Ahorro & {movimientos: any[]})[], deudas: (Debt & {payments: any[]})[], weekStartDay: number) {
-    const buckets = weeks.map(w => ({ title: w.label, start: w.start, end: w.end, ingresos: [], gastos: [], inversiones: [], aportes: [], pagosDeuda: [] }));
+  private calculateWeeklyProjection(
+    weeks: WeekSpan[],
+    ingresos: any[],
+    gastos: any[],
+    inversiones: Inversion[],
+    fondos: (Ahorro & { movimientos: MovimientoAhorro[] })[],
+    deudas: (Debt & { payments: any[] })[]
+  ) {
+    const buckets: { title: string; start: Date; end: Date; ingresos: any[]; gastos: any[]; inversiones: any[]; aportes: any[]; pagosDeuda: any[]; }[] = weeks.map(w => ({ title: w.label, start: w.start, end: w.end, ingresos: [], gastos: [], inversiones: [], aportes: [], pagosDeuda: [] }));
 
     const placeItem = (item: any, collection: any[][]) => {
-        const idx = this.placeInWeek(new Date(item.fecha || item.createdAt), weeks);
-        if (idx >= 0) {
-            collection[idx].push(item);
-        }
+      const idx = this.placeInWeek(new Date(item.fecha || item.createdAt), weeks);
+      if (idx >= 0) {
+        collection[idx].push(item);
+      }
     };
-    
+
     ingresos.forEach(i => {
-        if (!i.fijo || !i.frecuencia) { placeItem(i, buckets.map(b => b.ingresos)); }
-        else {
-            const dates = this.projectRecurringDates(i.fecha, weeks, i.frecuencia);
-            dates.forEach(d => placeItem({ ...i, fecha: d, __projection: true, id: `proj_ing_${i.id}_${d.toISOString().slice(0, 10)}` }, buckets.map(b => b.ingresos)));
-        }
+      if (!i.fijo || !i.frecuencia) {
+        placeItem(i, buckets.map(b => b.ingresos));
+      } else {
+        const dates = this.projectRecurringDates(i.fecha, weeks, i.frecuencia as any);
+        dates.forEach(d => placeItem({ ...i, fecha: d, __projection: true, id: `proj_ing_${i.id}_${d.toISOString().slice(0, 10)}` }, buckets.map(b => b.ingresos)));
+      }
     });
 
     gastos.forEach(g => {
-        if (!g.fijo || !g.frecuencia) { placeItem(g, buckets.map(b => b.gastos)); }
-        else {
-            const dates = this.projectRecurringDates(g.fecha, weeks, g.frecuencia);
-            dates.forEach(d => placeItem({ ...g, fecha: d, __projection: true, id: `proj_gto_${g.id}_${d.toISOString().slice(0, 10)}` }, buckets.map(b => b.gastos)));
-        }
+      if (!g.fijo || !g.frecuencia) {
+        placeItem(g, buckets.map(b => b.gastos));
+      } else {
+        const dates = this.projectRecurringDates(g.fecha, weeks, g.frecuencia as any);
+        dates.forEach(d => placeItem({ ...g, fecha: d, __projection: true, id: `proj_gto_${g.id}_${d.toISOString().slice(0, 10)}` }, buckets.map(b => b.gastos)));
+      }
     });
-    
+
     fondos.forEach(f => {
-        f.movimientos.forEach(m => placeItem({...m, objetivo: f.objetivo, tipo: 'aporte'}, buckets.map(b => b.aportes)));
-        if (f.fijo && f.aporteFijo > 0 && f.frecuencia) {
-            const dates = this.projectRecurringDates(f.fechaInicio, weeks, f.frecuencia as any);
-            dates.forEach(d => {
-                const ymd = d.toISOString().slice(0,10);
-                if (!f.movimientos.some(m => new Date(m.fecha).toISOString().slice(0,10) === ymd)) {
-                    placeItem({ monto: f.aporteFijo, fecha: d, objetivo: f.objetivo, tipo: 'aporte', __projection: true, id: `proj_apo_${f.id}_${ymd}` }, buckets.map(b => b.aportes));
-                }
-            });
-        }
+      // 1. SOLO proyectar aportes fijos.
+      if (f.fijo && f.aporteFijo && f.aporteFijo > 0 && f.frecuencia) {
+        const projectedDates = this.projectRecurringDates(f.fechaInicio, weeks, f.frecuencia as any);
+        projectedDates.forEach(d => {
+          placeItem({
+            monto: f.aporteFijo,
+            fecha: d,
+            objetivo: f.objetivo,
+            motivo: `Aporte fijo a ${f.objetivo}`,
+            __projection: true,
+            id: `proj_apo_${f.id}_${d.toISOString().slice(0, 10)}`
+          }, buckets.map(b => b.aportes));
+        });
+      }
+      
+      // 2. SOLO añadir movimientos REALES que NO sean "Aporte inicial".
+      const movimientosDeFlujoReal = f.movimientos.filter(m => m.motivo !== 'Aporte inicial');
+      movimientosDeFlujoReal.forEach(m => {
+          placeItem({ ...m, objetivo: f.objetivo, tipo: 'aporte' }, buckets.map(b => b.aportes));
+      });
     });
     
     deudas.forEach(d => {
-        d.payments.forEach(p => placeItem({ ...p, title: d.title, tipo: 'pagoDeuda' }, buckets.map(b => b.pagosDeuda)));
-        if (d.installmentAmount > 0 && d.firstDueDate && d.frequency) {
-            const dates = this.projectRecurringDates(d.firstDueDate, weeks, d.frequency as any);
-            dates.forEach(due => {
-                const ymd = due.toISOString().slice(0,10);
-                if (!d.payments.some(p => new Date(p.fecha).toISOString().slice(0,10) === ymd)) {
-                    placeItem({ monto: d.installmentAmount, fecha: due, title: d.title, tipo: 'pagoDeuda', __projection: true, id: `proj_deu_${d.id}_${ymd}` }, buckets.map(b => b.pagosDeuda));
-                }
-            });
-        }
+      d.payments.forEach(p => placeItem({ ...p, title: d.title, tipo: 'pagoDeuda' }, buckets.map(b => b.pagosDeuda)));
+      if (d.installmentAmount && d.installmentAmount > 0 && d.firstDueDate && d.frequency) {
+        const dates = this.projectRecurringDates(d.firstDueDate, weeks, d.frequency as any);
+        dates.forEach(due => {
+          const ymd = due.toISOString().slice(0, 10);
+          if (!d.payments.some(p => new Date(p.fecha).toISOString().slice(0, 10) === ymd)) {
+            placeItem({ monto: d.installmentAmount, fecha: due, title: d.title, tipo: 'pagoDeuda', __projection: true, id: `proj_deu_${d.id}_${ymd}` }, buckets.map(b => b.pagosDeuda));
+          }
+        });
+      }
     });
 
     inversiones.forEach(inv => placeItem(inv, buckets.map(b => b.inversiones)));
@@ -236,17 +254,21 @@ export class DashboardService {
     
     const result = buckets.map((b) => {
       const totals = {
-        ingresos: sum(b.ingresos), gastos: sum(b.gastos), ahorros: sum(b.aportes),
-        inversiones: sumInversiones(b.inversiones), pagosDeuda: sum(b.pagosDeuda), balance: 0,
+        ingresos: sum(b.ingresos),
+        gastos: sum(b.gastos),
+        ahorros: sum(b.aportes),
+        inversiones: sumInversiones(b.inversiones),
+        pagosDeuda: sum(b.pagosDeuda),
+        balance: 0,
       };
       totals.balance = totals.ingresos - totals.gastos - totals.ahorros - totals.inversiones - totals.pagosDeuda;
       return { ...b, totals };
     });
 
     const totalsAll = result.reduce((acc, r) => {
-        Object.keys(r.totals).forEach(key => { if(key !== 'balance') acc[key] = (acc[key] || 0) + r.totals[key]; });
-        return acc;
-      }, { ingresos: 0, gastos: 0, ahorros: 0, inversiones: 0, pagosDeuda: 0 });
+      Object.keys(r.totals).forEach(key => { if (key !== 'balance') acc[key] = (acc[key] || 0) + r.totals[key]; });
+      return acc;
+    }, { ingresos: 0, gastos: 0, ahorros: 0, inversiones: 0, pagosDeuda: 0 });
 
     return { weeks: result, totals: totalsAll };
   }

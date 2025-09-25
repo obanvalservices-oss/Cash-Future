@@ -1,5 +1,6 @@
-// src/inversiones/dto/update-inversione.dto.ts
+// src/inversiones/dto/update-inversion.dto.ts
 import { PartialType } from '@nestjs/mapped-types';
-import { CreateInversionDto } from './create-inversione.dto'
+import { CreateInversionDto } from './create-inversione.dto';
 
-export class UpdateInversioneDto extends PartialType(CreateInversionDto) {}
+// CORREGIDO: Se eliminó la 'e' extra de "Inversione"
+export class UpdateInversionDto extends PartialType(CreateInversionDto) {}

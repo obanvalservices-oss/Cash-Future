@@ -1,20 +1,34 @@
-import { IsBoolean, IsDateString, IsNotEmpty, IsNumber, IsString } from 'class-validator';
+import { IsBoolean, IsDateString, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class CrearAhorroDto {
   @IsString()
   @IsNotEmpty()
-  categoria: string;
-
-  @IsNumber()
-  monto: number;
-
-  @IsString()
-  @IsNotEmpty()
   objetivo: string;
 
+  @IsNumber()
+  @Min(0)
+  meta: number; // Corregido: de 'monto' a 'meta'
+
   @IsBoolean()
-  recurrente: boolean;
+  fijo: boolean; // Corregido: de 'recurrente' a 'fijo'
 
   @IsDateString()
-  fecha: string;
+  fechaInicio: string; // Corregido: de 'fecha' a 'fechaInicio'
+
+  // Campos opcionales que el formulario también puede enviar
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  aporteInicial?: number;
+
+  @IsString()
+  @IsOptional()
+  frecuencia?: string;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  aporteFijo?: number;
+
+  // El campo 'categoria' no está en tu schema de Ahorro, lo he eliminado.
 }

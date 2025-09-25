@@ -1,18 +1,10 @@
 // src/inversiones/inversiones.controller.ts
-import { Controller, Get, Post, Body, Patch, Param, Delete, Req, UseGuards, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete, Req, UseGuards, Patch } from '@nestjs/common';
 import { InversionesService } from './inversiones.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-
-class CreateInversionDto {
-  tipo: string;
-  activo: string;
-  ticker: string; // <-- AÑADIDO
-  cantidad: number;
-  precioCompra: number;
-  descripcion?: string;
-}
-
-class UpdateInversionDto extends CreateInversionDto {}
+import { CreateInversionDto } from './dto/create-inversione.dto';
+// CORREGIDO: Nos aseguramos de que la importación y el uso sean correctos
+import { UpdateInversionDto } from './dto/update-inversione.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('inversiones')
@@ -30,17 +22,17 @@ export class InversionesController {
   }
 
   @Get(':id')
-  findOne(@Req() req, @Param('id', ParseIntPipe) id: number) {
-    return this.inversionesService.findOne(req.user.id, id);
+  findOne(@Param('id') id: string) {
+    return this.inversionesService.findOne(id);
   }
 
   @Patch(':id')
-  update(@Req() req, @Param('id', ParseIntPipe) id: number, @Body() updateInversionDto: Partial<UpdateInversionDto>) {
-    return this.inversionesService.update(req.user.id, id, updateInversionDto);
+  update(@Param('id') id: string, @Body() updateInversionDto: UpdateInversionDto) {
+    return this.inversionesService.update(id, updateInversionDto);
   }
 
   @Delete(':id')
-  remove(@Req() req, @Param('id', ParseIntPipe) id: number) {
-    return this.inversionesService.remove(req.user.id, id);
+  remove(@Param('id') id: string) {
+    return this.inversionesService.remove(id);
   }
 }

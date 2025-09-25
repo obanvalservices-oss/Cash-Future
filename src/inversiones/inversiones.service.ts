@@ -1,62 +1,28 @@
 // src/inversiones/inversiones.service.ts
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-
-// DTO para mayor claridad y consistencia
-interface CreateInversionDto {
-  tipo: string;
-  activo: string;
-  ticker: string; // Añadido
-  cantidad: number;
-  precioCompra: number;
-  descripcion?: string;
-}
-
-interface UpdateInversionDto extends Partial<CreateInversionDto> {}
+import { CreateInversionDto } from './dto/create-inversione.dto';
+import { UpdateInversionDto } from './dto/update-inversione.dto';
 
 @Injectable()
 export class InversionesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /**
-   * Busca o crea un fondo de inversión por defecto para el usuario.
-   */
-  private async findOrCreateDefaultFondo(userId: number) {
-    const defaultFondoName = 'Mi Portafolio';
-    let fondo = await this.prisma.fondoInversion.findFirst({
-      where: { userId, nombre: defaultFondoName },
-    });
-
-    if (!fondo) {
-      fondo = await this.prisma.fondoInversion.create({
-        data: {
-          nombre: defaultFondoName,
-          user: { connect: { id: userId } },
-        },
-      });
-    }
-    return fondo;
-  }
-
   async create(userId: number, dto: CreateInversionDto) {
-    try {
-      const fondo = await this.findOrCreateDefaultFondo(userId);
+    // Separamos el fondoId del resto de los datos del DTO
+    const { fondoId, ...inversionData } = dto;
 
+    try {
       return await this.prisma.inversion.create({
         data: {
-          tipo: dto.tipo,
-          activo: dto.activo,
-          ticker: dto.ticker,
-          cantidad: dto.cantidad,
-          precioCompra: dto.precioCompra,
-          descripcion: dto.descripcion,
-          fondo: { connect: { id: fondo.id } },
-          user: { connect: { id: userId } },
+          ...inversionData, // Usamos el resto de los datos del DTO
+          user: { connect: { id: userId } }, // Conectamos con el usuario
+          fondo: { connect: { id: fondoId } }, // Conectamos con el fondo de inversión
         },
         include: { fondo: true },
       });
-    } catch (error) {
-      console.error('Error detallado al crear inversión:', error);
+    } catch (e) {
+      console.error('Error al crear inversión:', e);
       throw new InternalServerErrorException('Error al crear la inversión.');
     }
   }
@@ -69,34 +35,37 @@ export class InversionesService {
     });
   }
 
-  async findOne(userId: number, id: number) {
-    const row = await this.prisma.inversion.findFirst({
-      where: { id, userId },
+  async findOne(id: string) {
+    const row = await this.prisma.inversion.findUnique({
+      where: { id: Number(id) },
       include: { fondo: true },
     });
     if (!row) throw new NotFoundException('Inversión no encontrada');
     return row;
   }
 
-  async update(userId: number, id: number, dto: UpdateInversionDto) {
-    await this.findOne(userId, id); // Verifica que la inversión existe y pertenece al usuario
+  async update(id: string, dto: UpdateInversionDto) {
+    const { fondoId, ...inversionData } = dto;
 
     try {
       return await this.prisma.inversion.update({
-        where: { id },
-        data: dto, // Prisma ignorará campos undefined, es más limpio
+        where: { id: Number(id) },
+        data: {
+          ...inversionData,
+          // Si se envía un nuevo fondoId, actualizamos la conexión
+          ...(fondoId && { fondo: { connect: { id: fondoId } } }),
+        },
         include: { fondo: true },
       });
-    } catch {
+    } catch (e) {
+      console.error('Error al actualizar inversión:', e);
       throw new InternalServerErrorException('Error al actualizar la inversión.');
     }
   }
 
-  async remove(userId: number, id: number) {
-    await this.findOne(userId, id); // Verifica pertenencia antes de borrar
-
+  async remove(id: string) {
     try {
-      return await this.prisma.inversion.delete({ where: { id } });
+      return await this.prisma.inversion.delete({ where: { id: Number(id) } });
     } catch {
       throw new InternalServerErrorException('Error al eliminar la inversión.');
     }

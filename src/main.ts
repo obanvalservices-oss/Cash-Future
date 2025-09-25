@@ -1,9 +1,12 @@
 // src/main.ts
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { ValidationPipe } from '@nestjs/common'; // <--- 1. IMPORTA ValidationPipe
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  app.useGlobalPipes(new ValidationPipe()); // <--- 2. AÑADE ESTA LÍNEA
 
   // CORS DEV: permitir localhost/127.0.0.1 y cualquier otro (para pruebas)
   app.enableCors({
