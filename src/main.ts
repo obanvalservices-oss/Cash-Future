@@ -1,35 +1,49 @@
-// src/main.ts
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common'; // <--- 1. IMPORTA ValidationPipe
+import { ValidationPipe } from '@nestjs/common';
+import { LoggerMiddleware } from './common/middleware/logger.middleware';
+
+function buildCorsChecker() {
+  const localhostRegex = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+  const env = (process.env.FRONTEND_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+  const allowList = new Set(env);
+
+  return (origin: string | undefined, cb: (err: Error | null, ok?: boolean) => void) => {
+    if (!origin) return cb(null, true); // curl/Postman
+    if (allowList.has('*') || allowList.has(origin) || localhostRegex.test(origin)) {
+      return cb(null, true);
+    }
+    return cb(new Error(`CORS bloqueado para origen: ${origin}`), false);
+  };
+}
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  app.useGlobalPipes(new ValidationPipe()); // <--- 2. AÑADE ESTA LÍNEA
+  app.use(LoggerMiddleware);
 
-  // CORS DEV: permitir localhost/127.0.0.1 y cualquier otro (para pruebas)
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
+
   app.enableCors({
-    origin: (origin, cb) => {
-      // Permite herramientas sin Origin (curl, Postman) y cualquier página en dev
-      if (!origin) return cb(null, true);
-      const allow = [
-        'http://localhost:8080',
-        'http://127.0.0.1:8080',
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-      ];
-      if (allow.includes(origin)) return cb(null, true);
-      // En dev, permite todo para evitar falsos bloqueos
-      return cb(null, true);
-    },
+    origin: buildCorsChecker(),
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-    // No usamos cookies/sessions, así que desactiva credenciales para simplificar CORS
     credentials: false,
+    maxAge: 86400,
   });
 
-  await app.listen(3000);
-  console.log('> API on http://localhost:3000');
+  const PORT = Number(process.env.PORT || 3001);
+
+  process.on('uncaughtException', (err) => {
+    console.error('Excepción no capturada:', err);
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('Rechazo no manejado:', reason);
+  });
+
+  await app.listen(PORT);
+  console.log(`> API Cash-Future escuchando en http://localhost:${PORT}`);
+  console.log(`> CORS: localhost/127.* habilitados + FRONTEND_ORIGIN=${process.env.FRONTEND_ORIGIN || '(vacío)'}`);
 }
 bootstrap();
